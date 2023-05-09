@@ -12,7 +12,7 @@ class ContrastiveTransformations:
     augmentations to an image twice.
     """
 
-    def __init__(self, base_transforms, n_views=2, img_size=128):
+    def __init__(self, base_transforms, n_views=2, img_size=64):
         self.base_transforms = base_transforms
         self.crop_or_pad = CropOrPad(img_size)
         self.n_views = n_views

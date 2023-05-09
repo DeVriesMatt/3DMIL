@@ -150,7 +150,7 @@ def train_simclr(
         devices=num_gpus,
         max_epochs=max_epochs,
         callbacks=[
-            ModelCheckpoint(save_weights_only=True, mode="max", monitor="val_acc_top5"),
+            ModelCheckpoint(save_weights_only=True, mode="min", monitor="train_loss"),
             LearningRateMonitor("epoch"),
         ],
     )
@@ -173,17 +173,9 @@ def train_simclr(
             pin_memory=True,
             num_workers=num_workers,
         )
-        val_loader = data.DataLoader(
-            dataset=dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            drop_last=False,
-            pin_memory=True,
-            num_workers=num_workers,
-        )
 
         model = SimCLR(max_epochs=max_epochs, model_3d=model_3d, **kwargs)
-        trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader)
         # Load the best checkpoint after training
         model = SimCLR.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
 

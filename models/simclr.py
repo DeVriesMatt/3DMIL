@@ -13,7 +13,7 @@ class SimCLR(pl.LightningModule):
         self, hidden_dim, lr, temperature, weight_decay, max_epochs=500, model_3d=None
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["model_3d"])
         assert (
             self.hparams.temperature > 0.0
         ), "The temperature must be a positive float!"
