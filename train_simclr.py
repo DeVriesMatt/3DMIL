@@ -104,9 +104,9 @@ def main(args):
     # Setting the seed
     pl.seed_everything(42)
     if args.resnet_size == 18:
-        model_2d = resnet18(pretrained=True, num_classes=4 * 128)
+        model_2d = resnet18(pretrained=True)
     elif args.resnet_size == 50:
-        model_2d = resnet50(pretrained=True, num_classes=4 * 128)
+        model_2d = resnet50(pretrained=True)
     else:
         raise NotImplementedError
     # Convert the model to use ACSConv instead of regular convolutions

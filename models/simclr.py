@@ -26,7 +26,7 @@ class SimCLR(pl.LightningModule):
         self.convnet.fc = nn.Sequential(
             self.convnet.fc,  # Linear(ResNet output, 4*hidden_dim)
             nn.ReLU(inplace=True),
-            nn.Linear(4 * hidden_dim, hidden_dim),
+            nn.Linear(1000, hidden_dim),
         )
 
     def configure_optimizers(self):
