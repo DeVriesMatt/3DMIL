@@ -150,7 +150,7 @@ def train_simclr(
         devices=num_gpus,
         max_epochs=max_epochs,
         callbacks=[
-            ModelCheckpoint(save_weights_only=False, mode="min", monitor="train_loss"),
+            ModelCheckpoint(save_weights_only=True, mode="min", monitor="train_loss"),
             LearningRateMonitor("epoch"),
         ],
     )

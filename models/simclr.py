@@ -4,9 +4,6 @@ import torch.nn.functional as F
 import torch
 import pytorch_lightning as pl
 
-# Setting the seed
-pl.seed_everything(42)
-
 
 class SimCLR(pl.LightningModule):
     def __init__(
