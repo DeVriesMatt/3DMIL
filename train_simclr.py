@@ -104,9 +104,9 @@ def main(args):
     # Setting the seed
     pl.seed_everything(42)
     if args.resnet_size == 18:
-        model_2d = resnet18(pretrained=False, num_classes=4 * 128)
+        model_2d = resnet18(pretrained=True, num_classes=4 * 128)
     elif args.resnet_size == 50:
-        model_2d = resnet50(pretrained=False, num_classes=4 * 128)
+        model_2d = resnet50(pretrained=True, num_classes=4 * 128)
     else:
         raise NotImplementedError
     # Convert the model to use ACSConv instead of regular convolutions
@@ -150,7 +150,7 @@ def train_simclr(
         devices=num_gpus,
         max_epochs=max_epochs,
         callbacks=[
-            ModelCheckpoint(save_weights_only=True, mode="min", monitor="train_loss"),
+            ModelCheckpoint(save_weights_only=False, mode="min", monitor="train_loss"),
             LearningRateMonitor("epoch"),
         ],
     )
