@@ -119,12 +119,10 @@ class VoxData(Dataset):
     def __getitem__(self, idx):
         # read the image
         treatment = self.new_df.loc[idx, "Treatment"]
-        plate_num = "Plate" + str(self.new_df.loc[idx, "PlateNumber"])
 
         cell = tfl.imread(
             os.path.join(
                 self.img_dir,
-                plate_num,
                 "stacked_intensity_cell",
                 self.new_df.loc[idx, "serialNumber"] + ".tif",
             )
@@ -133,7 +131,6 @@ class VoxData(Dataset):
         nuc = tfl.imread(
             os.path.join(
                 self.img_dir,
-                plate_num,
                 "stacked_intensity_nucleus",
                 self.new_df.loc[idx, "serialNumber"] + ".tif",
             )
@@ -142,7 +139,6 @@ class VoxData(Dataset):
         erk = tfl.imread(
             os.path.join(
                 self.img_dir,
-                plate_num,
                 "stacked_erk",
                 self.new_df.loc[idx, "serialNumber"] + ".tif",
             )
