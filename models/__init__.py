@@ -1,3 +1,4 @@
 from .simclr import SimCLR
+from .transabmil import TransABMIL
 
-__all__ = ("SimCLR",)
+__all__ = ("SimCLR", "TransABMIL")

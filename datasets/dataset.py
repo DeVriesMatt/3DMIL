@@ -10,6 +10,126 @@ from pathlib import Path
 import tifffile as tfl
 
 
+class GEFGAPData(Dataset):
+    """
+    Dataset class for the GEFGAP dataset
+    """
+
+    def __init__(self, h5_path=None, csv_path=None, state=None, shuffle=False):
+        # Set all input args as attributes
+        self.__dict__.update(locals())
+        self.h5_path = h5_path
+        self.csv_path = csv_path
+        self.shuffle = shuffle
+
+        self.slide_data = pd.read_csv(self.csv_path)
+
+        self.state = state
+
+        self.pwn = np.unique(
+            [
+                f"{self.slide_data.loc[i, 'PlateNumber']}"
+                f"{self.slide_data.loc[i, 'well_nuc']}"
+                for i in range(len(self.slide_data))
+            ]
+        )
+
+    def __len__(self):
+        return len(self.pwn)
+
+    def __getitem__(self, idx):
+        slide_id = self.pwn[idx]
+        full_path = Path(self.h5_path) / f"{slide_id}.csv"
+        hdf = pd.read_csv(full_path)
+
+        features = torch.from_numpy(hdf.iloc[:, :100].values).type(torch.DoubleTensor)
+        label = np.unique(hdf["Treatment"].values)
+        treatment = np.unique(hdf["Treatment"].values)
+        serial_number = hdf["serialNumber"].values
+
+        # ----> shuffle
+        if self.shuffle:
+            index = [x for x in range(features.shape[0])]
+            random.shuffle(index)
+            features = features[index]
+
+        return features, label, slide_id, treatment, serial_number.tolist()
+
+
+class CellData(Dataset):
+    """
+    Dataset class for the single cell dataset
+    """
+
+    def __init__(
+        self,
+        h5_path=None,
+        csv_path=None,
+        state=None,
+        shuffle=False,
+        drug_label="Blebbistatin",
+    ):
+        # Set all input args as attributes
+        self.__dict__.update(locals())
+        self.h5_path = h5_path
+        self.csv_path = csv_path
+        self.shuffle = shuffle
+        self.drug_label = drug_label
+
+        self.slide_data = pd.read_csv(self.csv_path)
+        labels = {
+            "Binimetinib": 0,
+            "Blebbistatin": 0,
+            "CK666": 0,
+            "DMSO": 0,
+            "H1152": 0,
+            "MK1775": 0,
+            "No Treatment": 0,
+            "Nocodazole": 0,
+            "PF228": 0,
+            "Palbociclib": 0,
+        }
+        self.label_dict = {k: 1 if k == self.drug_label else 0 for k in labels}
+
+        # ---->split dataset
+        self.state = state
+        self.pwn = np.unique(
+            self.slide_data[
+                (self.slide_data["Splits"] == self.state)  # &
+                #             (self.slide_data['Class']!='Trials') &
+                #             (self.slide_data['Class']!='Successful')
+            ]["PlateWellNum"]
+            .reset_index(drop=True)
+            .values
+        )
+        self.label = self.slide_data[
+            (self.slide_data["Splits"] == self.state)  # &
+            #             (self.slide_data['Class']!='Trials') &
+            #             (self.slide_data['Class']!='Successful')
+        ]["Treatment"].reset_index(drop=True)
+
+    def __len__(self):
+        return len(self.pwn)
+
+    def __getitem__(self, idx):
+        slide_id = self.pwn[idx]
+        full_path = Path(self.h5_path) / f"{slide_id}.csv"
+        hdf = pd.read_csv(full_path)
+
+        features = torch.from_numpy(hdf.iloc[:, :100].values).type(torch.DoubleTensor)
+        label = torch.tensor(int(self.label_dict[np.unique(hdf["Treatment"])[0]]))
+        treatment = np.unique(hdf["Treatment"])[0]
+        serial_number = hdf["serialNumber"].values
+
+        # ----> shuffle
+        if self.shuffle:
+            index = [x for x in range(features.shape[0])]
+            random.shuffle(index)
+            features = features[index]
+
+        return features, label, slide_id, treatment, serial_number.tolist()
+
+
 class FieldData(Dataset):
     def __init__(self, h5_path=None, csv_path=None, state=None, shuffle=False):
         super(FieldData, self).__init__()
@@ -53,8 +173,8 @@ class FieldData(Dataset):
 
     def __getitem__(self, idx):
         slide_id = f"field_{str(self.pwn[idx]).zfill(4)}"
-        full_path = Path(self.h5_path) / f"{slide_id}.h5"
-        hdf = pd.read_hdf(full_path)
+        full_path = Path(self.h5_path) / f"{slide_id}.csv"
+        hdf = pd.read_csv(full_path)
 
         features = torch.from_numpy(hdf.iloc[:, :2048].values).type(torch.DoubleTensor)
         label = torch.tensor(

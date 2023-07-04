@@ -1,0 +1,3 @@
+max_epochs: 250
+num_classes: 2
+prob_transform: 0.5

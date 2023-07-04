@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument(
         "--img_dir",
         type=str,
-        default="/mnt/nvme0n1/Datasets/SingleCellFromNathan_17122021/",
+        default="/mnt/nvme0n1/Datasets/SingleCellFromNathan_17122021/Plate1/",
         help="Path to directory containing images",
     )
     parser.add_argument(
