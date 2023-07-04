@@ -119,7 +119,7 @@ def get_args():
         "--model_type",
         type=str,
         choices=["TransABMIL", "DSMIL", "mean_pool", "max_pool"],
-        default="mean_pool",
+        default="TransABMIL",
         help="Choice of model.",
     )
 
@@ -152,19 +152,20 @@ def train(args):
     else:
         i_class = "none"
 
-    model = TransABMIL(
-        num_classes=2,
-        criterion=nn.BCEWithLogitsLoss(weight=torch.tensor([9.0]).cuda()),
-        model_type=args.model_type,
-        i_class=i_class,
-    )
-
     setattr(
         args,
         "log_dir",
         os.path.join(
             args.log_dir, args.project_name, args.drug_label, f"fold_{args.fold}"
         ),
+    )
+
+    model = TransABMIL(
+        num_classes=2,
+        criterion=nn.BCEWithLogitsLoss(weight=torch.tensor([9.0]).cuda()),
+        model_type=args.model_type,
+        i_class=i_class,
+        log_dir=args.log_dir,
     )
 
     if args.logger == "wandb":
@@ -191,6 +192,7 @@ def train(args):
         callbacks=[early_stop_callback, checkpoint_callback, lr_monitor],
         default_root_dir=args.log_dir,
         logger=logger,
+        num_sanity_val_steps=0,
     )
     trainer.fit(model, cell_data)
     print(f"Finished training model for drug: {args.drug_label}")

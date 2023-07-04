@@ -3,8 +3,9 @@ import torch
 from torch import nn
 
 import pytorch_lightning as pl
-from torchmetrics import Accuracy, AUROC, F1Score, Precision, Recall
+from torchmetrics import Accuracy, AUROC, F1Score, Precision, Recall, MetricCollection
 from datasets.data_augmentation import DataAugmentation
+import pandas as pd
 
 
 class TransIClassifier(nn.Module):
@@ -143,7 +144,7 @@ class MILNet(nn.Module):
         feats, classes = self.i_classifier(x)
         prediction_bag, A, B, A_raw = self.b_classifier(feats, classes)
 
-        return classes, prediction_bag, A, B, A_raw
+        return classes, prediction_bag, feats, A, B, A_raw
 
 
 class Classifier(nn.Module):
@@ -174,7 +175,8 @@ class TransABMIL(pl.LightningModule):
         prob_transform=0.5,
         max_epochs=250,
         model_type="TransABMIL",
-        **kwargs
+        log_dir="./logs",
+        **kwargs,
     ):
         super(TransABMIL, self).__init__()
 
@@ -190,14 +192,28 @@ class TransABMIL(pl.LightningModule):
         self.transform = DataAugmentation(0.0, 1, 0.5)
         self.max_epochs = max_epochs
         self.binacc = Accuracy(task="binary")
-        self.AUC = AUROC(task="binary", num_classes=num_classes)
+        self.AUROC = AUROC(task="binary", num_classes=num_classes)
         self.F1 = F1Score(task="binary", num_classes=num_classes, average="macro")
         self.precision_metric = Precision(
             task="binary", num_classes=num_classes, average="macro"
         )
         self.recall = Recall(task="binary", num_classes=num_classes, average="macro")
 
-        self.data = [{"count": 0, "correct": 0} for i in range(self.n_classes)]
+        self.data = [{"count": 0, "correct": 0} for i in range(self.num_classes)]
+        self.log_path = log_dir
+        metrics = MetricCollection(
+            [
+                self.binacc,
+                self.F1,
+                self.precision_metric,
+                self.recall,
+            ]
+        )
+        self.train_metrics = metrics.clone(prefix="train_")
+        self.valid_metrics = metrics.clone(prefix="val_")
+        self.test_metrics = metrics.clone(prefix="test_")
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
 
     def forward(self, x):
         return self.model(x)
@@ -222,14 +238,14 @@ class TransABMIL(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         inputs, labels = batch[0].double(), batch[1].double()
-        classes, bag_prediction, _, _, _ = self.model(torch.squeeze(inputs).double())
+        output = self.model(torch.squeeze(inputs).double())
+        classes, bag_prediction = output[0], output[1]
         max_prediction, index = torch.max(classes, 0)
         loss_bag = self.criterion(bag_prediction[0], labels)
         loss_max = self.criterion(max_prediction, labels)
         loss = 0.5 * loss_bag + 0.5 * loss_max
-
-        y_hat = torch.sigmoid(bag_prediction)
-        acc = self.binacc(y_hat, labels.unsqueeze(1))
+        y_prob = torch.sigmoid(bag_prediction)
+        acc = self.binacc(y_prob, labels.unsqueeze(1))
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, logger=True)
         self.log(
@@ -241,7 +257,7 @@ class TransABMIL(pl.LightningModule):
             prog_bar=True,
         )
 
-        Y_hat = y_hat > 0.5
+        Y_hat = int(y_prob > 0.5)
         Y = int(labels.unsqueeze(1))
         self.data[Y]["count"] += 1
         self.data[Y]["correct"] += Y_hat == Y
@@ -253,7 +269,7 @@ class TransABMIL(pl.LightningModule):
         return dic
 
     def on_train_epoch_end(self):
-        for c in 2:
+        for c in range(self.num_classes):
             count = self.data[c]["count"]
             correct = self.data[c]["correct"]
             if count == 0:
@@ -262,18 +278,18 @@ class TransABMIL(pl.LightningModule):
                 acc = float(correct) / count
             print("class {}: acc {}, correct {}/{}".format(c, acc, correct, count))
 
-        self.data = [{"count": 0, "correct": 0} for i in range(self.n_classes)]
+        self.data = [{"count": 0, "correct": 0} for i in range(self.num_classes)]
 
     def validation_step(self, batch, batch_idx):
         inputs, labels = batch[0].double(), batch[1].double()
-        classes, bag_prediction, _, _, _ = self.model(torch.squeeze(inputs).double())
+        output = self.model(torch.squeeze(inputs).double())
+        classes, bag_prediction = output[0], output[1]
         max_prediction, index = torch.max(classes, 0)
         loss_bag = self.criterion(bag_prediction[0], labels)
         loss_max = self.criterion(max_prediction, labels)
         loss = 0.5 * loss_bag + 0.5 * loss_max
-
-        y_hat = torch.sigmoid(bag_prediction)
-        acc = self.binacc(y_hat, labels.unsqueeze(1))
+        y_prob = torch.sigmoid(bag_prediction)
+        acc = self.binacc(y_prob, labels.unsqueeze(1))
 
         self.log("val_loss", loss, on_step=True, on_epoch=True, logger=True)
         self.log(
@@ -285,64 +301,73 @@ class TransABMIL(pl.LightningModule):
             prog_bar=True,
         )
         # ---->acc log
-        Y_hat = y_hat > 0.5
-        Y = int(labels.unsqueeze(1))
-        self.data[Y]["count"] += 1
-        self.data[Y]["correct"] += Y_hat == Y
+        Y_hat = torch.tensor(int(y_prob > 0.5)).to(self.device)
 
-    # def on_validation_epoch_end(self):
-    #     logits = torch.cat([x["logits"] for x in val_step_outputs], dim=0)
-    #     probs = torch.cat([x["Y_prob"] for x in val_step_outputs], dim=0)
-    #     max_probs = torch.stack([x["Y_hat"] for x in val_step_outputs])
-    #     target = torch.stack([x["label"] for x in val_step_outputs], dim=0)
-    #
-    #     # ---->
-    #     self.log(
-    #         "val_loss",
-    #         cross_entropy_torch(logits, target),
-    #         prog_bar=True,
-    #         on_epoch=True,
-    #         logger=True,
-    #     )
-    #     self.log(
-    #         "auc",
-    #         self.AUROC(probs, target.squeeze()),
-    #         prog_bar=True,
-    #         on_epoch=True,
-    #         logger=True,
-    #     )
-    #     self.log_dict(
-    #         self.valid_metrics(max_probs.squeeze(), target.squeeze()),
-    #         on_epoch=True,
-    #         logger=True,
-    #     )
-    #
-    #     # ---->acc log
-    #     for c in range(self.n_classes):
-    #         count = self.data[c]["count"]
-    #         correct = self.data[c]["correct"]
-    #         if count == 0:
-    #             acc = None
-    #         else:
-    #             acc = float(correct) / count
-    #         print("class {}: acc {}, correct {}/{}".format(c, acc, correct, count))
-    #     self.data = [{"count": 0, "correct": 0} for i in range(self.n_classes)]
-    #
-    #     # ---->random, if shuffle data, change seed
-    #     if self.shuffle == True:
-    #         self.count = self.count + 1
-    #         random.seed(self.count * 50)
+        Y_hat_c = int(y_prob > 0.5)
+        Y_c = int(labels.unsqueeze(1))
+        self.data[Y_c]["count"] += 1
+        self.data[Y_c]["correct"] += Y_hat_c == Y_c
+
+        results = {
+            "logits": bag_prediction,
+            "Y_prob": y_prob,
+            "Y_hat": Y_hat,
+            "label": labels,
+        }
+        self.validation_step_outputs.append(results)
+        return results
+
+    def on_validation_epoch_end(self):
+        logits = torch.cat([x["logits"] for x in self.validation_step_outputs], dim=0)
+        probs = torch.cat([x["Y_prob"] for x in self.validation_step_outputs], dim=0)
+        max_probs = torch.stack([x["Y_hat"] for x in self.validation_step_outputs])
+        target = torch.stack([x["label"] for x in self.validation_step_outputs], dim=0)
+
+        # ---->
+        self.log(
+            "val_loss",
+            self.criterion(logits, target),
+            prog_bar=True,
+            on_epoch=True,
+            logger=True,
+        )
+        self.log(
+            "auc",
+            self.AUROC(probs, target.squeeze()),
+            prog_bar=True,
+            on_epoch=True,
+            logger=True,
+        )
+        self.log_dict(
+            self.valid_metrics(max_probs.squeeze(), target.squeeze()),
+            on_epoch=True,
+            logger=True,
+        )
+
+        # ---->acc log
+        for c in range(self.num_classes):
+            count = self.data[c]["count"]
+            correct = self.data[c]["correct"]
+            if count == 0:
+                acc = None
+            else:
+                acc = float(correct) / count
+            print("class {}: acc {}, correct {}/{}".format(c, acc, correct, count))
+        self.data = [{"count": 0, "correct": 0} for i in range(self.num_classes)]
+
+        self.validation_step_outputs.clear()
 
     def test_step(self, batch, batch_idx):
         inputs, labels = batch[0].double(), batch[1].double()
-        classes, bag_prediction, _, _, _ = self.model(torch.squeeze(inputs).double())
+        output = self.model(torch.squeeze(inputs).double())
+        classes, bag_prediction = output[0], output[1]
         max_prediction, index = torch.max(classes, 0)
         loss_bag = self.criterion(bag_prediction[0], labels)
         loss_max = self.criterion(max_prediction, labels)
         loss = 0.5 * loss_bag + 0.5 * loss_max
 
-        y_hat = torch.sigmoid(bag_prediction)
-        acc = self.binacc(y_hat, labels.unsqueeze(1))
+        y_prob = torch.sigmoid(bag_prediction)
+        acc = self.binacc(y_prob, labels.unsqueeze(1))
 
         self.log("test_loss", loss, on_step=True, on_epoch=True, logger=True)
         self.log(
@@ -353,9 +378,47 @@ class TransABMIL(pl.LightningModule):
             logger=True,
             prog_bar=True,
         )
+        Y_hat = torch.tensor(int(y_prob > 0.5)).to(self.device)
+        Y_hat_c = int(y_prob > 0.5)
+        Y_c = int(labels.unsqueeze(1))
+        self.data[Y_c]["count"] += 1
+        self.data[Y_c]["correct"] += Y_hat_c == Y_c
 
-    def test_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        avg_acc = torch.stack([x["acc"] for x in outputs]).mean()
-        self.log("avg_test_loss", avg_loss, logger=True)
-        self.log("avg_test_acc", avg_acc, logger=True)
+        results = {
+            "logits": bag_prediction,
+            "Y_prob": y_prob,
+            "Y_hat": Y_hat,
+            "label": labels,
+        }
+        self.test_step_outputs.append(results)
+
+        return results
+
+    def on_test_end(self):
+        probs = torch.cat([x["Y_prob"] for x in self.test_step_outputs], dim=0)
+        max_probs = torch.stack([x["Y_hat"] for x in self.test_step_outputs])
+        target = torch.stack([x["label"] for x in self.test_step_outputs], dim=0)
+
+        # ---->
+        auc = self.AUROC(probs, target.squeeze())
+        metrics = self.test_metrics(max_probs.squeeze(), target.squeeze())
+        metrics["auc"] = auc
+        for keys, values in metrics.items():
+            print(f"{keys} = {values}")
+            metrics[keys] = values.cpu().numpy()
+        print()
+        # ---->acc log
+        for c in range(self.num_classes):
+            count = self.data[c]["count"]
+            correct = self.data[c]["correct"]
+            if count == 0:
+                acc = None
+            else:
+                acc = float(correct) / count
+            print("class {}: acc {}, correct {}/{}".format(c, acc, correct, count))
+        self.data = [{"count": 0, "correct": 0} for i in range(self.num_classes)]
+        # ---->
+        result = pd.DataFrame([metrics])
+        result.to_csv(self.log_path + "/result.csv")
+
+        self.test_step_outputs.clear()
